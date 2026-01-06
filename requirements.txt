@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+pandas
+transformers
+torch
+accelerate
+bitsandbytes
+sentence-transformers
+einops
+protobuf
+scipy
+chromadb
