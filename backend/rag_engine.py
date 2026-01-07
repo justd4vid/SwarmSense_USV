@@ -3,9 +3,8 @@ import json
 import pandas as pd
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, pipeline
 from sentence_transformers import SentenceTransformer
-import torch
+import requests
 from dotenv import load_dotenv
 from typing import List, Dict
 
@@ -22,7 +21,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
 class SwarmRAG:
     def __init__(self):
-        print("Initializing Local SwarmRAG with Qwen2.5-7B-Instruct (4-bit)...")
+        print("Initializing Local SwarmRAG with Ollama (Qwen3 8B)...")
         
         try:
             # 1. Initialize Embeddings (Local)
@@ -37,39 +36,26 @@ class SwarmRAG:
                 embedding_function=self.embedding_function
             )
             
-            # 3. Initialize Local LLM (4-bit quantization)
-            model_id = "Qwen/Qwen2.5-7B-Instruct"
+            # 3. Configure Ollama connection
+            self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+            self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
             
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True
-            )
+            # Test connection to Ollama
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+            if response.status_code != 200:
+                raise ConnectionError(f"Cannot connect to Ollama at {self.ollama_url}")
             
-            self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                quantization_config=bnb_config,
-                device_map="auto",
-                trust_remote_code=True
-            )
+            # Check if model is available
+            available_models = [m['name'] for m in response.json().get('models', [])]
+            if not any(self.ollama_model in m for m in available_models):
+                print(f"Warning: Model '{self.ollama_model}' not found. Available: {available_models}")
             
-            self.pipe = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                max_new_tokens=512,
-                temperature=0.1,
-                top_p=0.95,
-                repetition_penalty=1.15
-            )
-
-            print("SwarmRAG initialized successfully with Local LLM.")
+            self.llm_ready = True
+            print(f"SwarmRAG initialized successfully with Ollama ({self.ollama_model}).")
         except Exception as e:
             print(f"Failed to initialize Local SwarmRAG components: {e}")
             self.collection = None
-            self.pipe = None
+            self.llm_ready = False
 
     def ingest_logs(self, file_path: str):
         """
@@ -173,10 +159,10 @@ class SwarmRAG:
         RAG Pipeline:
         1. Retrieve relevant logs from Chroma.
         2. Construct Prompt.
-        3. Call Local LLM.
+        3. Call Ollama LLM.
         """
-        if not self.pipe or not self.collection:
-            return "Local RAG is not initialized check logs for errors."
+        if not self.llm_ready or not self.collection:
+            return "Local RAG is not initialized - check logs for errors."
 
         try:
             # Retrieve
@@ -199,26 +185,30 @@ class SwarmRAG:
                 "Be concise and professional."
             )
             
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query_text}"}
-            ]
+            # Call Ollama chat API
+            response = requests.post(
+                f"{self.ollama_url}/api/chat",
+                json={
+                    "model": self.ollama_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query_text}"}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "top_p": 0.95,
+                        "num_predict": 512
+                    }
+                },
+                timeout=120
+            )
             
-            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            if response.status_code != 200:
+                return f"Ollama error: {response.text}"
             
-            outputs = self.pipe(prompt)
-            generated_text = outputs[0]["generated_text"]
-            
-            # Extract only the assistant's response (remove the prompt)
-            # Different models have different raw output formats, but generation usually appends.
-            # Qwen chat template handles this, but pipeline returns full text usually.
-            
-            # Basic parsing: look for where the prompt ends
-            if prompt in generated_text:
-                response = generated_text.replace(prompt, "").strip()
-            else:
-                response = generated_text # Fallback
-            
-            return response
+            result = response.json()
+            return result.get("message", {}).get("content", "No response generated.")
         except Exception as e:
             return f"Error during query: {str(e)}"
+
