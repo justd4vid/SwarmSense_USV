@@ -8,37 +8,42 @@ from typing import Dict
 NUM_BOATS = 20
 LOG_FILE = "sim_log.jsonl"
 SIMULATION_DURATION_SEC = 60 * 10  # Generate 10 minutes of data. 
-SIMULATION_STEP_SEC = 1.0  # Seconds between updates
+SIMULATION_STEP_SEC = 1.0  # Time between updates (simulation tick)
 AREA_CENTER = (24.0, 119.5)  # Taiwan Strait near Penghu County
-AREA_RADIUS = 0.5  # Degrees
+AREA_RADIUS_DEG = 0.1  # 1 degree latitude ~ 111 km
 
 class USV:
     def __init__(self, boat_id: int):
         self.id = boat_id
         # Start at random positions around center
-        self.lat = AREA_CENTER[0] + random.uniform(-AREA_RADIUS, AREA_RADIUS)
-        self.lon = AREA_CENTER[1] + random.uniform(-AREA_RADIUS, AREA_RADIUS)
+        self.lat = AREA_CENTER[0] + random.uniform(-AREA_RADIUS_DEG, AREA_RADIUS_DEG)
+        self.lon = AREA_CENTER[1] + random.uniform(-AREA_RADIUS_DEG, AREA_RADIUS_DEG)
         self.battery = 100.0
         self.status = "IDLE"  # IDLE, MOVING, ERROR
         self.error_msg = ""
         self.course = random.uniform(0, 360)
+        self.target_course = self.course # Target destination angle
         self.speed = 0.0
+        self.max_turn_rate = 10.0
 
     def step_sim(self):
-        # Battery drain (per virtual second)
-        self.battery -= random.uniform(0.001, 0.005) 
-
+        propulsion_drain = (self.speed ** 3) * 0.0002 # Rule of thumb: Power ~ v^3
+        self.battery -= propulsion_drain
         if self.battery < 0: self.battery = 0
 
-        # Random state changes
+        # Handle Error State
         if self.status == "ERROR":
-            # 5% chance to resolve error
-            if random.random() < 0.05:
-                self.status = "IDLE"
-                self.error_msg = ""
+            # Motor failure is permanent. Only check recovery for Comms/GPS.
+            if self.error_msg in ["GPS Signal Lost", "Comms Timeout"]:
+                if random.random() < 0.02:  # 2% chance to regain signal
+                    self.status = "IDLE"
+                    self.error_msg = ""
+            
+            # If still in ERROR, ensure speed is 0
+            self.speed = 0.0
         else:
-            # 1% chance to get an error
-            if random.random() < 0.02:
+            # 1% chance to trigger a new error
+            if random.random() < 0.01:
                 self.status = "ERROR"
                 errors = ["Motor Failure", "GPS Signal Lost", "Comms Timeout"]
                 self.error_msg = random.choice(errors)
@@ -53,15 +58,31 @@ class USV:
                 if random.random() < 0.01:
                     self.status = "IDLE"
                     self.speed = 0.0
-                else:
-                    # Realistic movement: 1 knot = 0.0005144 meters per second
+                elif random.random() < 0.0001: # 0.01% chance to change mind/target course while moving
+                    self.target_course = random.uniform(0, 360)
 
-                    # For visualization, we keep your move_factor but scale it
-
-                    move_factor = 0.00001 * self.speed 
-                    self.lat += move_factor * math.cos(math.radians(self.course))
-                    self.lon += move_factor * math.sin(math.radians(self.course))
-                    self.course += random.uniform(-5, 5) # Random wiggle
+        # Smooth Turning Logic
+        if self.status == "MOVING":
+            # Calculate the shortest distance between current course and target course
+            diff = (self.target_course - self.course + 180) % 360 - 180
+            
+            # Apply turn rate limit
+            if abs(diff) > self.max_turn_rate:
+                # Turn by the max rate in the correct direction
+                step_turn = self.max_turn_rate if diff > 0 else -self.max_turn_rate
+                self.course = (self.course + step_turn) % 360
+            else:
+                # If we're close enough, snap to the target
+                self.course = self.target_course
+        
+        # Movement Execution
+        if self.speed > 0:
+            move_factor = 0.000005 * self.speed
+            self.lat += move_factor * math.cos(math.radians(self.course))
+            self.lon += move_factor * math.sin(math.radians(self.course))
+            
+            # Add jitter
+            self.course = (self.course + random.uniform(-0.5, 0.5)) % 360
 
     def to_dict(self, current_virtual_time: datetime) -> Dict:
         return {
@@ -69,11 +90,11 @@ class USV:
             "boat_id": self.id,
             "lat": round(self.lat, 6),
             "lon": round(self.lon, 6),
-            "battery": round(self.battery, 1),
+            "battery": int (self.battery),
             "status": self.status,
             "error_details": self.error_msg,
-            "speed_knots": round(self.speed, 2),
-            "course_deg": round(self.course, 1)
+            "speed_knots": round(self.speed, 1),
+            "course_deg": int (self.course)
         }
 
 def run_simulation():
