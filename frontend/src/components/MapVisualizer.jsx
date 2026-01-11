@@ -49,6 +49,13 @@ const MapVisualizer = ({ boats, isPlaying }) => {
                 {boats.map((boat) => {
                     const { x, y } = getPos(boat.lat, boat.lon);
                     const isError = boat.status === 'ERROR';
+                    const isAdversary = boat.type === 'adversary';
+
+                    // Style config
+                    const mainColor = isAdversary ? 'bg-orange-500' : 'bg-cyan-500';
+                    const glowColor = isAdversary ? 'bg-orange-500' : 'bg-cyan-500';
+                    // Add error override
+                    const ringColor = isError ? 'bg-red-500 animate-pulse' : glowColor;
 
                     return (
                         <motion.div
@@ -61,23 +68,25 @@ const MapVisualizer = ({ boats, isPlaying }) => {
                             <div className="relative group cursor-pointer">
                                 {/* Status Indicator Ring */}
                                 <div className={`absolute inset-0 rounded-full opacity-30 blur-sm 
-                  ${isError ? 'bg-red-500 animate-pulse' : 'bg-cyan-500'} 
+                  ${ringColor} 
                   ${(isPlaying && boat.status === 'MOVING') ? 'animate-ping' : ''}`}
                                 />
 
                                 {/* Icon */}
                                 <div className={`relative z-10 p-1 rounded-full shadow-lg border border-white/20 
-                  ${isError ? 'bg-red-600 text-white' : 'bg-slate-800 text-cyan-400'}`}>
+                  ${isError ? 'bg-red-600 text-white' : (isAdversary ? 'bg-orange-900 text-orange-400' : 'bg-slate-800 text-cyan-400')}`}>
                                     {isError ? <AlertTriangle size={16} /> :
                                         <Navigation size={16} style={{ transform: `rotate(${boat.course_deg}deg)` }} />}
                                 </div>
 
                                 {/* Tooltip on Hover */}
                                 <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-max max-w-xs p-2 rounded bg-slate-800 border border-slate-600 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-20 text-xs text-slate-200 pointer-events-none">
-                                    <p className="font-bold text-white">Unit {boat.boat_id}</p>
-                                    <p>Status: <span className={isError ? 'text-red-400' : 'text-green-400'}>{boat.status}</span></p>
-                                    <p>Bat: {boat.battery}%</p>
-                                    {isError && <p className="text-red-300 mt-1">{boat.error_details}</p>}
+                                    <p className={`font-bold ${isAdversary ? 'text-orange-400' : 'text-cyan-400'}`}>{boat.boat_id}</p>
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">{boat.type || 'Unknown'}</p>
+                                    <p>Status: <span className={isError ? 'text-red-400' : 'text-green-400'}>{boat.status || 'OK'}</span></p>
+                                    {boat.battery !== undefined && <p>Bat: {boat.battery}%</p>}
+                                    {boat.speed_knots !== undefined && <p>Spd: {boat.speed_knots} kn</p>}
+                                    {isError && boat.error_details && <p className="text-red-300 mt-1">{boat.error_details}</p>}
                                 </div>
                             </div>
                         </motion.div>

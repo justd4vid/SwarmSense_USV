@@ -27,9 +27,10 @@ swarm_state = {}
 all_logs = []
 playback_active = False
 playback_thread = None
+playback_speed = 1.0
 
 def playback_worker():
-    global swarm_state, playback_active, all_logs
+    global swarm_state, playback_active, all_logs, playback_speed
     print("Starting playback...")
     playback_active = True
     
@@ -37,19 +38,50 @@ def playback_worker():
     # Assuming timestamp is ISO string or comparable
     sorted_logs = sorted(all_logs, key=lambda x: x.get('timestamp', ''))
 
-    for log in sorted_logs:
+    i = 0
+    while i < len(sorted_logs):
         if not playback_active:
             break
         
-        # Update state for this boat
-        swarm_state[log['boat_id']] = log
+        # Determine current virtual step duration (logs are 1s step)
+        # We want to sleep 1.0 / speed.
+        # But if speed is high, we might want to skip frames or batch updates?
+        # For simplicity, just sleep less.
         
-        # Simple pacing: small sleep
-        # Adjust this value to speed up/slow down playback
-        time.sleep(0.05) 
+        log = sorted_logs[i]
+        
+        # Assume somewhat ordered logs.
+        # Logs are interleaved for multiple boats. 
+        # A batch of logs share the same timestamp.
+        # We should emit all logs for a single timestamp at once.
+        
+        # Simple approach used before: just loop one by one.
+        # But for correct playback, we should group by timestamp?
+        # The previous code looped one by one with a sleep.
+        # That means "10 boats * sleep" = 1 simulation step.
+        # If sleep = 0.05, 10 boats = 0.5s per step.
+        # User wants 1x (real-time 1s per step).
+        # So sleep should be (1.0 / speed) / num_boats_per_step?
+        # Better: Group by timestamp.
+        
+        current_ts = log['timestamp']
+        batch = []
+        while i < len(sorted_logs) and sorted_logs[i]['timestamp'] == current_ts:
+            batch.append(sorted_logs[i])
+            i += 1
+            
+        # Update state for batch
+        for b in batch:
+             swarm_state[b['boat_id']] = b
+        
+        # Wait for next step
+        time.sleep(1.0 / playback_speed)
         
     print("Playback finished.")
     playback_active = False
+
+class SpeedRequest(BaseModel):
+    speed: float
 
 class QueryRequest(BaseModel):
     query: str
@@ -62,8 +94,15 @@ def read_root():
 def get_map_data():
     return {
         "boats": list(swarm_state.values()),
-        "is_active": playback_active
+        "is_active": playback_active,
+        "speed": playback_speed
     }
+
+@app.post("/playback/speed")
+async def set_speed(request: SpeedRequest):
+    global playback_speed
+    playback_speed = max(0.1, min(100.0, request.speed))
+    return {"status": "ok", "speed": playback_speed}
 
 @app.post("/upload")
 async def upload_log(file: UploadFile = File(...)):

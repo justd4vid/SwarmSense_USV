@@ -13,6 +13,7 @@ const App = () => {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
 
   // Track previous playing state to detect completion
   const prevPlayingRef = React.useRef(false);
@@ -28,6 +29,7 @@ const App = () => {
 
       setBoats(boatData);
       setIsPlaying(active);
+      if (res.data.speed) setPlaybackSpeed(res.data.speed);
 
       // Detect simulation end (True -> False transition)
       if (prevPlayingRef.current && !active) {
@@ -165,6 +167,29 @@ const App = () => {
           </label>
         </div>
       </header>
+
+      {/* Playback Controls */}
+      {isPlaying && (
+        <div className="flex justify-center -mt-4 mb-2 z-10 relative">
+          <div className="glass-panel px-4 py-2 rounded-full flex gap-2 items-center">
+            <span className="text-xs text-slate-400 font-mono">PLAYBACK SPEED:</span>
+            {[1, 2, 5, 10].map(s => (
+              <button
+                key={s}
+                onClick={async () => {
+                  try {
+                    setPlaybackSpeed(s);
+                    axios.post('/playback/speed', { speed: s });
+                  } catch (e) { console.error(e); }
+                }}
+                className={`text-xs px-2 py-1 rounded font-bold transition-all ${playbackSpeed === s ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main Grid */}
       <main className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0">

@@ -6,7 +6,6 @@ from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
 from sentence_transformers import SentenceTransformer
 import requests
 from dotenv import load_dotenv
-from typing import List, Dict
 
 load_dotenv()
 
@@ -97,12 +96,22 @@ class SwarmRAG:
         
         for idx, row in df.iterrows():
             boat_id = row['boat_id']
-            status = row['status']
+            # Handle potentially missing fields from new simulator format
+            status = row.get('status')
+            if not status:
+                # Synthesize status
+                speed = row.get('speed_knots', 0)
+                status = "MOVING" if speed > 0.1 else "IDLE"
+            
+            # Additional fields
+            boat_type = row.get('type', 'unknown')
+            target_id = row.get('target_id')
+            
             timestamp = row['timestamp']
             
             is_significant = False
             
-            # Rule 1: Errors
+            # Rule 1: Errors (if field exists and is "ERROR")
             if status == "ERROR":
                 is_significant = True
             
@@ -120,13 +129,21 @@ class SwarmRAG:
                 # Construct text description
                 text = (
                     f"Timestamp: {timestamp}. "
-                    f"Boat {boat_id} is {status}. "
+                    f"Boat {boat_id} ({boat_type}) is {status}. "
                     f"Position: ({row['lat']}, {row['lon']}). "
-                    f"Battery: {row['battery']}%. "
-                    f"Speed: {row['speed_knots']} kn. "
-                    f"Course: {row['course_deg']} deg. "
                 )
-                if row['error_details']:
+                
+                # Add optional fields if present
+                if 'battery' in row:
+                    text += f"Battery: {row['battery']}%. "
+                if 'speed_knots' in row:
+                    text += f"Speed: {row['speed_knots']} kn. "
+                if 'course_deg' in row:
+                    text += f"Course: {row['course_deg']} deg. "
+                if target_id:
+                     text += f"Target: {target_id}. "
+                
+                if row.get('error_details'):
                     text += f"Error: {row['error_details']}."
                 
                 documents.append(text)
