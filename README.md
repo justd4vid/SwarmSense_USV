@@ -1,8 +1,11 @@
 # SwarmSense: RAG-Powered USV Swarm Observability
-**SwarmSense** is a monitoring layer designed to bridge the gap between high-level mission oversight and low-level telemetry. By leveraging **Retrieval-Augmented Generation (RAG)**, it enables operators to manage large fleets of Unmanned Surface Vehicles (USVs) through natural language, reducing cognitive load and increasing decision-making speed.
+**SwarmSense** is a prototype demonstration of a monitoring layer for Unmanned Surface Vehicle (USV) swarms. It is designed to bridge the gap between high-level mission oversight and low-level telemetry, allowing operators to manage large fleets while reducing cognitive load and improving decision-making.
+
+> [!IMPORTANT] 
+> **Project Scope:** This is a **technical demonstration** and proof-of-concept. It is designed to explore the application of Retrieval-Augmented Generation (RAG) in maritime robotics environments, focusing on reducing human cognitive load during swarm operations.
 
 ### The Problem: The Attention Bottleneck
-As swarm operations scale, the human becomes the bottleneck. Traditional monitoring requires an operator to:
+As swarm operations scale, the human becomes the bottleneck. Traditional monitoring requires a technically-proficient operator to:
 1. **Identify** which specific USV is experiencing an issue (e.g., GPS dropout).
 2. **Diagnose** by manually sifting through logs and signal graphs.
 3. **Correct** the issue while the rest of the swarm continues to operate unmonitored.
@@ -21,7 +24,7 @@ SwarmSense transforms telemetry from a stream of logs into a **searchable, conve
 The system is divided into three parts: the simulator, the processing engine, and the interface.
 
 ### Simulator
-Generates synthetic data of friendly and adversarial USVs operating in a 2D coordinate system. 
+Generates synthetic data of friendly and adversarial USVs operating in a 2D map with latitude and longitude coordinates.
 - Friendly Units: Equipped with self-localization, velocity sensors, and adversarial detection.
 - Adversarial Units: "Red team" units that move southward at constant velocity to test swarm response.
 - Behavior: Friendly units target adversarial units and move to intercept them. 
