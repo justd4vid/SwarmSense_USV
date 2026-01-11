@@ -150,6 +150,28 @@ const App = () => {
             <RefreshCw size={18} className="text-slate-400" />
           </button>
 
+          {/* Live Sim Controls */}
+          <button
+            onClick={async () => {
+              try {
+                if (isPlaying) {
+                  await axios.post('/simulation/stop');
+                } else {
+                  await axios.post('/simulation/start');
+                }
+                fetchMapData();
+              } catch (e) {
+                console.error(e);
+                alert("Operation failed");
+              }
+            }}
+            className={`flex items-center gap-2 p-2 px-4 rounded-lg cursor-pointer transition-colors font-semibold text-white
+              ${isPlaying ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'}`}
+          >
+            <Activity size={18} />
+            <span>{isPlaying ? "Stop Sim" : "Start Live Sim"}</span>
+          </button>
+
           <label className="flex items-center gap-2 p-2 px-4 bg-cyan-600 hover:bg-cyan-500 rounded-lg cursor-pointer transition-colors text-white font-semibold">
             <Upload size={18} />
             <span>Upload Logs</span>

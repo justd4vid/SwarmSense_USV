@@ -171,67 +171,69 @@ class USV:
             "target_id": target_id
         }
 
+class SwarmSimulator:
+    def __init__(self):
+        self.adversaries = [AdversaryBoat(i) for i in range(1, NUM_ADVERSARY_BOATS + 1)]
+        self.usvs = [USV(i) for i in range(1, NUM_FRIENDLY_BOATS + 1)]
+        self.virtual_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.assign_targets()
+        
+    def assign_targets(self):
+        # "The first adversary is assigned the 5 closest USVs."
+        if len(self.adversaries) >= 1:
+            adv1 = self.adversaries[0]
+            # Calculate all distances
+            usv_dists = []
+            for u in self.usvs:
+                d = calculate_distance_km(adv1.lat, adv1.lon, u.lat, u.lon)
+                usv_dists.append((d, u))
+            
+            # Sort by distance
+            usv_dists.sort(key=lambda x: x[0])
+            
+            # Assign closest 5 to Adv 1
+            group1 = [pair[1] for pair in usv_dists[:5]]
+            group2 = [pair[1] for pair in usv_dists[5:]]
+            
+            for u in group1:
+                u.target_boat = adv1
+                
+            if len(self.adversaries) > 1:
+                adv2 = self.adversaries[1]
+                for u in group2:
+                    u.target_boat = adv2
+            else:
+                 for u in group2:
+                     u.target_boat = adv1
+
+    def step(self, dt: float):
+        self.virtual_time += timedelta(seconds=dt)
+        
+        for adv in self.adversaries:
+            adv.step_sim(dt)
+            
+        for usv in self.usvs:
+            usv.step_sim(dt)
+            
+    def get_state(self) -> List[Dict]:
+        return [boat.to_dict(self.virtual_time) for boat in self.adversaries + self.usvs]
+
 def run_simulation():
     print(f"Generating simulation for {SIMULATION_DURATION_SEC} seconds...")
     
-    # 1. Init boats
-    adversaries = [AdversaryBoat(i) for i in range(1, NUM_ADVERSARY_BOATS + 1)]
-    usvs = [USV(i) for i in range(1, NUM_FRIENDLY_BOATS + 1)]
-    
-    # 2. Assign Targets
-    # "The first adversary is assigned the 5 closest USVs."
-    # We need to calculate distances from Adversary 1 to all USVs to find the closest 5.
-    if len(adversaries) >= 1:
-        adv1 = adversaries[0]
-        # Calculate all distances
-        usv_dists = []
-        for u in usvs:
-            d = calculate_distance_km(adv1.lat, adv1.lon, u.lat, u.lon)
-            usv_dists.append((d, u))
-        
-        # Sort by distance
-        usv_dists.sort(key=lambda x: x[0])
-        
-        # Assign closest 5 to Adv 1
-        group1 = [pair[1] for pair in usv_dists[:5]]
-        # Assign rest to Adv 2 (if exists, else Adv 1 too?)
-        # Requirement: "The remaining 5 USVs have the second adversary as their target."
-        group2 = [pair[1] for pair in usv_dists[5:]]
-        
-        for u in group1:
-            u.target_boat = adv1
-            
-        if len(adversaries) > 1:
-            adv2 = adversaries[1]
-            for u in group2:
-                u.target_boat = adv2
-        else:
-             # Fallback if only 1 adversary
-             for u in group2:
-                 u.target_boat = adv1
-
-    # 3. Sim Loop
-    virtual_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    sim = SwarmSimulator()
     
     with open(LOG_FILE, "w") as f:
         # Initial State
-        for boat in adversaries + usvs:
-            f.write(json.dumps(boat.to_dict(virtual_time)) + "\n")
+        for state in sim.get_state():
+             f.write(json.dumps(state) + "\n")
 
         for _ in range(int(SIMULATION_DURATION_SEC / SIMULATION_STEP_SEC)):
-            virtual_time += timedelta(seconds=SIMULATION_STEP_SEC)
-            
-            # Step Adversaries
-            for adv in adversaries:
-                adv.step_sim(SIMULATION_STEP_SEC)
-                
-            # Step USVs
-            for usv in usvs:
-                usv.step_sim(SIMULATION_STEP_SEC)
+            sim.step(SIMULATION_STEP_SEC)
             
             # Log
-            for boat in adversaries + usvs:
-                f.write(json.dumps(boat.to_dict(virtual_time)) + "\n")
+            for state in sim.get_state():
+                f.write(json.dumps(state) + "\n")
                 
     print(f"Simulation saved to {LOG_FILE}")
 

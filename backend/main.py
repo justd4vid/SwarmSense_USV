@@ -1,9 +1,14 @@
+import sys
+import os
+# Add simulator directory to path
+sys.path.append(os.path.join(os.path.dirname(__file__), "../simulator"))
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import shutil
-import os
 from rag_engine import SwarmRAG
+from swarm_sim import SwarmSimulator
 
 app = FastAPI(title="Swarm Intelligence Assistant")
 
@@ -29,6 +34,15 @@ playback_active = False
 playback_thread = None
 playback_speed = 1.0
 
+# Live Simulation State
+simulation_instance = None
+live_sim_active = False
+live_sim_thread = None
+
+def get_virtual_step_delay():
+    # Base step is 1.0s.
+    return 1.0 / playback_speed
+
 def playback_worker():
     global swarm_state, playback_active, all_logs, playback_speed
     print("Starting playback...")
@@ -43,27 +57,7 @@ def playback_worker():
         if not playback_active:
             break
         
-        # Determine current virtual step duration (logs are 1s step)
-        # We want to sleep 1.0 / speed.
-        # But if speed is high, we might want to skip frames or batch updates?
-        # For simplicity, just sleep less.
-        
         log = sorted_logs[i]
-        
-        # Assume somewhat ordered logs.
-        # Logs are interleaved for multiple boats. 
-        # A batch of logs share the same timestamp.
-        # We should emit all logs for a single timestamp at once.
-        
-        # Simple approach used before: just loop one by one.
-        # But for correct playback, we should group by timestamp?
-        # The previous code looped one by one with a sleep.
-        # That means "10 boats * sleep" = 1 simulation step.
-        # If sleep = 0.05, 10 boats = 0.5s per step.
-        # User wants 1x (real-time 1s per step).
-        # So sleep should be (1.0 / speed) / num_boats_per_step?
-        # Better: Group by timestamp.
-        
         current_ts = log['timestamp']
         batch = []
         while i < len(sorted_logs) and sorted_logs[i]['timestamp'] == current_ts:
@@ -75,16 +69,39 @@ def playback_worker():
              swarm_state[b['boat_id']] = b
         
         # Wait for next step
-        time.sleep(1.0 / playback_speed)
+        time.sleep(get_virtual_step_delay())
         
     print("Playback finished.")
     playback_active = False
 
-class SpeedRequest(BaseModel):
-    speed: float
+def live_sim_worker():
+    global swarm_state, live_sim_active, simulation_instance
+    print("Starting live simulation...")
+    live_sim_active = True
+    
+    while live_sim_active:
+        if not simulation_instance:
+            break
+            
+        # Run one step
+        simulation_instance.step(1.0)
+        
+        # Get state and update global map
+        current_state_list = simulation_instance.get_state()
+        for boat in current_state_list:
+            swarm_state[boat['boat_id']] = boat
+            
+        # Wait
+        time.sleep(get_virtual_step_delay())
+        
+    print("Live simulation stopped.")
+    live_sim_active = False
 
 class QueryRequest(BaseModel):
     query: str
+
+class SpeedRequest(BaseModel):
+    speed: float
 
 @app.get("/")
 def read_root():
@@ -94,7 +111,7 @@ def read_root():
 def get_map_data():
     return {
         "boats": list(swarm_state.values()),
-        "is_active": playback_active,
+        "is_active": playback_active or live_sim_active,
         "speed": playback_speed
     }
 
@@ -104,15 +121,50 @@ async def set_speed(request: SpeedRequest):
     playback_speed = max(0.1, min(100.0, request.speed))
     return {"status": "ok", "speed": playback_speed}
 
+@app.post("/simulation/start")
+async def start_simulation():
+    global playback_active, live_sim_active, simulation_instance, live_sim_thread, swarm_state
+    
+    # Stop any existing playback or sim
+    playback_active = False
+    live_sim_active = False
+    if playback_thread and playback_thread.is_alive():
+        playback_thread.join(timeout=0.5)
+    if live_sim_thread and live_sim_thread.is_alive():
+        live_sim_thread.join(timeout=0.5)
+
+    # Init new Sim
+    try:
+        simulation_instance = SwarmSimulator()
+        swarm_state = {}
+        
+        # Start Thread
+        live_sim_thread = threading.Thread(target=live_sim_worker)
+        live_sim_thread.daemon = True
+        live_sim_thread.start()
+        
+        return {"status": "started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simulation/stop")
+async def stop_simulation():
+    global live_sim_active
+    live_sim_active = False
+    return {"status": "stopped"}
+
 @app.post("/upload")
 async def upload_log(file: UploadFile = File(...)):
-    global all_logs, playback_active, playback_thread, swarm_state
+    global all_logs, playback_active, playback_thread, swarm_state, live_sim_active
     
-    # Stop existing playback
+    # Stop existing playback/sim
     playback_active = False
+    live_sim_active = False
     if playback_thread and playback_thread.is_alive():
         playback_thread.join(timeout=1.0)
-
+    if live_sim_thread and live_sim_thread.is_alive():
+        live_sim_thread.join(timeout=1.0)
+    
     try:
         file_location = f"temp_{file.filename}"
         with open(file_location, "wb+") as file_object:
